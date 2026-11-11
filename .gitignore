@@ -1,0 +1,24 @@
+# Dart & Flutter
+.dart_tool/
+.packages
+build/
+pubspec.lock
+
+# Development tests and evaluation artifacts
+test_apps/
+tools/
+50_TEST_APPS_EVALUATION_REPORT.md
+ANALYZER_DEVELOPMENT_REPORT_FA.md
+*.log
+*eval*.dart
+
+# Generated localization outputs (at runtime)
+l10n/
+*.arb
+
+# OS & Editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml

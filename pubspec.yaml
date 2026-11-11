@@ -1,0 +1,8 @@
+name: localize_persian
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  analyzer: ^6.0.0
+  path: ^1.9.1
+dev_dependencies:
+  test: ^1.26.3
