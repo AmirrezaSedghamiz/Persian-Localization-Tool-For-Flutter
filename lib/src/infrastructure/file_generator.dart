@@ -1,0 +1,317 @@
+import 'dart:io';
+import 'dart:convert';
+import '../domain/models/extraction_state.dart';
+import '../utils/string_utils.dart';
+
+class FileGenerator {
+  final ExtractionState state;
+
+  FileGenerator(this.state);
+
+  void writeFaArb() {
+    Directory('l10n').createSync(recursive: true);
+
+    final buffer = StringBuffer('{\n');
+    final entries = state.extractedStrings.entries.toList();
+
+    for (int i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      buffer.write('  "${entry.key}": "${escapeJson(entry.value)}"');
+      if (i < entries.length - 1) buffer.write(',');
+      buffer.writeln();
+    }
+    buffer.write('}');
+
+    File('l10n/intl_fa.arb').writeAsStringSync(buffer.toString());
+  }
+
+  void writeStringLocations() {
+    final buffer = StringBuffer();
+    buffer.writeln('STRING LOCATIONS REPORT');
+    buffer.writeln('=' * 50);
+
+    for (final entry in state.stringLocations.entries) {
+      final key = entry.key;
+      final value = state.extractedStrings[key] ?? '';
+      final locations = entry.value;
+
+      buffer.writeln('\n🔑 Key: $key');
+      buffer.writeln('📝 Text: "$value"');
+      buffer.writeln('📍 Locations (${locations.length}):');
+
+      for (final location in locations) {
+        buffer.writeln(
+            '  • ${location.filePath}:${location.offset} (${location.context})');
+        buffer.writeln('    Original: ${location.originalText}');
+      }
+    }
+
+    final jsonData = <String, dynamic>{};
+    for (final entry in state.stringLocations.entries) {
+      jsonData[entry.key] = {
+        'text': state.extractedStrings[entry.key],
+        'locations': entry.value
+            .map((loc) => {
+                  'file': loc.filePath,
+                  'offset': loc.offset,
+                  'end': loc.end,
+                  'original': loc.originalText,
+                  'context': loc.context,
+                })
+            .toList(),
+      };
+    }
+
+    final jsonFile = File('l10n/string_locations.json');
+    jsonFile.writeAsStringSync(JsonEncoder.withIndent('  ').convert(jsonData));
+
+    File('l10n/string_locations.txt').writeAsStringSync(buffer.toString());
+  }
+
+  void writeDynamicReport() {
+    if (state.dynamicStrings.isEmpty) {
+      print('   📊 No dynamic strings found');
+      return;
+    }
+
+    final buffer = StringBuffer();
+    buffer.writeln('DYNAMIC STRINGS REPORT');
+    buffer.writeln('=' * 50);
+    buffer.writeln(
+        '\nFound ${state.dynamicStrings.length} dynamic/complex string expressions:\n');
+
+    for (int i = 0; i < state.dynamicStrings.length; i++) {
+      buffer.writeln('${i + 1}. ${state.dynamicStrings[i]}');
+      buffer.writeln('─' * 40);
+    }
+
+    File('l10n/dynamic_strings.txt').writeAsStringSync(buffer.toString());
+    print('   📊 Wrote dynamic strings report: l10n/dynamic_strings.txt');
+  }
+
+  void writeProcessingReport() {
+    final report = StringBuffer();
+    report.writeln('PROCESSING REPORT');
+    report.writeln('=' * 50);
+    report.writeln('\nPROCESSED FILES (${state.processedFiles.length}):');
+    for (final file in state.processedFiles) {
+      report.writeln('  • $file');
+    }
+
+    report.writeln('\nSKIPPED FILES (${state.skippedFiles.length}):');
+    for (final file in state.skippedFiles) {
+      report.writeln('  • $file');
+    }
+
+    File('l10n/processing_report.txt').writeAsStringSync(report.toString());
+  }
+
+  void buildArbFiles() {
+    print('🏗️  Building ARB files and localization class...');
+
+    final faArbFile = File('l10n/intl_fa.arb');
+    if (!faArbFile.existsSync()) {
+      print('❌ Error: l10n/intl_fa.arb not found. Run extraction first.');
+      return;
+    }
+
+    final faContent = faArbFile.readAsStringSync();
+    final faMap = json.decode(faContent) as Map<String, dynamic>;
+
+    // Load existing English ARB if it exists
+    final enArbFile = File('l10n/intl_en.arb');
+    Map<String, dynamic> enArb = {};
+
+    if (enArbFile.existsSync()) {
+      try {
+        final enContent = enArbFile.readAsStringSync();
+        enArb = json.decode(enContent) as Map<String, dynamic>;
+        print('📂 Loaded existing English ARB with ${enArb.length} entries');
+      } catch (e) {
+        print('⚠️ Could not load existing English ARB: $e');
+      }
+    }
+
+    // Update English ARB with new keys
+    for (final key in faMap.keys) {
+      if (!enArb.containsKey(key)) {
+        enArb[key] = faMap[key];
+      }
+    }
+
+    // Write English ARB
+    enArbFile.writeAsStringSync(JsonEncoder.withIndent('  ').convert(enArb));
+
+    print('✅ Created/Updated:');
+    print('   - l10n/intl_fa.arb (${faMap.length} entries)');
+    print('   - l10n/intl_en.arb (${enArb.length} entries)');
+
+    // Generate Dart localization class
+    _generateLocalizationClass(faMap.keys.toList());
+  }
+
+  void _generateLocalizationClass(List<String> keys) {
+    print('📝 Generating localization class...');
+
+    final buffer = StringBuffer();
+
+    buffer.writeln('''
+// GENERATED FILE - DO NOT EDIT
+// This file was generated by the Persian String Localization Tool
+
+import 'package:flutter/material.dart';
+
+class AppLocalizations {
+  AppLocalizations(this.locale);
+
+  final Locale locale;
+
+  static AppLocalizations of(BuildContext context) {
+    return Localizations.of<AppLocalizations>(context, AppLocalizations)!;
+  }
+
+  static const LocalizationsDelegate<AppLocalizations> delegate =
+      _AppLocalizationsDelegate();
+
+  // Translation maps
+  static final Map<String, Map<String, String>> _localizedValues = {
+    'en': {
+''');
+
+    // Load existing English translations for context
+    final enArbFile = File('l10n/intl_en.arb');
+    final enArb = enArbFile.existsSync()
+        ? json.decode(enArbFile.readAsStringSync()) as Map<String, dynamic>
+        : {};
+
+    // Add English translations
+    for (final key in keys) {
+      final existingTranslation = enArb[key];
+      if (existingTranslation != null) {
+        buffer.writeln(
+            "      '$key': '${escapeDartString(existingTranslation.toString())}',");
+      } else {
+        buffer.writeln("      '$key': '$key', // TODO: Translate to English");
+      }
+    }
+
+    buffer.writeln('''
+    },
+    'fa': {
+''');
+
+    // Add Persian translations
+    final faArbFile = File('l10n/intl_fa.arb');
+    final faContent = faArbFile.readAsStringSync();
+    final faMap = json.decode(faContent) as Map<String, dynamic>;
+
+    for (final entry in faMap.entries) {
+      buffer.writeln(
+          "      '${entry.key}': '${escapeDartString(entry.value.toString())}',");
+    }
+
+    buffer.writeln('''
+    },
+  };
+
+  String _getText(String key) {
+    final languageCode = locale.languageCode;
+    
+    // Try exact match
+    if (_localizedValues[languageCode]?[key] != null) {
+      return _localizedValues[languageCode]![key]!;
+    }
+    
+    // Fallback to English
+    if (_localizedValues['en']?[key] != null) {
+      return _localizedValues['en']![key]!;
+    }
+    
+    // Fallback to key itself
+    return key;
+  }
+''');
+
+    // Generate getter methods for each key
+    for (final key in keys) {
+      final methodName = keyToMethodName(key);
+      buffer.writeln('''
+  String get $methodName => _getText('$key');
+''');
+    }
+
+    buffer.writeln('''
+}
+
+class _AppLocalizationsDelegate extends LocalizationsDelegate<AppLocalizations> {
+  const _AppLocalizationsDelegate();
+
+  @override
+  bool isSupported(Locale locale) => ['en', 'fa'].contains(locale.languageCode);
+
+  @override
+  Future<AppLocalizations> load(Locale locale) async {
+    return AppLocalizations(locale);
+  }
+
+  @override
+  bool shouldReload(_AppLocalizationsDelegate old) => false;
+}
+''');
+
+    final outputDir = Directory('lib/generated');
+    outputDir.createSync(recursive: true);
+
+    final outputFile = File('lib/generated/localizations.dart');
+    outputFile.writeAsStringSync(buffer.toString());
+
+    print('✅ Generated: lib/generated/localizations.dart');
+    print('   - ${keys.length} translation keys');
+    print('\n📋 Next steps to use in your app:');
+    print('''
+  1. Add to your MaterialApp/CupertinoApp:
+     localizationsDelegates: [
+       AppLocalizations.delegate,
+       GlobalMaterialLocalizations.delegate,
+       GlobalWidgetsLocalizations.delegate,
+     ],
+     supportedLocales: [
+       Locale('en'),
+       Locale('fa'),
+     ],
+  
+  2. Import the generated file:
+     import 'generated/localizations.dart';
+  
+  3. Use in your widgets:
+     Text(AppLocalizations.of(context).fa1)
+  ''');
+  }
+
+  void cleanUp() {
+    print('🧹 Cleaning up generated files...');
+
+    final filesToClean = [
+      'l10n/intl_fa.arb',
+      'l10n/intl_en.arb',
+      'l10n/string_locations.json',
+      'l10n/string_locations.txt',
+      'l10n/dynamic_strings.txt',
+      'l10n/processing_report.txt',
+      'lib/generated/localizations.dart',
+    ];
+
+    int removedCount = 0;
+
+    for (final filePath in filesToClean) {
+      final file = File(filePath);
+      if (file.existsSync()) {
+        file.deleteSync();
+        removedCount++;
+        print('   🗑️  Removed: $filePath');
+      }
+    }
+
+    print('✅ Removed $removedCount files');
+  }
+}
